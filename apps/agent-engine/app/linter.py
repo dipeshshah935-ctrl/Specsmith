@@ -189,7 +189,7 @@ class DeterministicLinter:
                     )
                 )
 
-        # 4. Feature checks & FSM self-loop transition check
+        # 4. Feature checks & FSM transition checks
         for feat in state.features:
             if not feat.upstream_ids:
                 defects.append(
@@ -230,23 +230,35 @@ class DeterministicLinter:
                     )
                 )
 
-            # FSM self-loop transition check
-            if feat.state_machine:
-                for trans in feat.state_machine:
-                    if trans.from_state == trans.to_state:
-                        defects.append(
-                            ValidationDefect(
-                                rule_code="ERR_FSM_INVALID_TRANSITION",
-                                severity=DefectSeverity.BLOCKING,
-                                target_agent="ProductArchitect",
-                                target_item_id=feat.id,
-                                message=(
-                                    f"Feature {feat.id} has invalid self-loop state transition "
-                                    f"where from_state == to_state ('{trans.from_state}')."
-                                ),
-                                suggested_fix="Ensure from_state and to_state represent distinct states.",
-                            )
+            # FSM transition checks: if state_machine is not None, trigger if empty or has self-loop
+            if feat.state_machine is not None:
+                if len(feat.state_machine) == 0:
+                    defects.append(
+                        ValidationDefect(
+                            rule_code="ERR_FSM_INVALID_TRANSITION",
+                            severity=DefectSeverity.BLOCKING,
+                            target_agent="ProductArchitect",
+                            target_item_id=feat.id,
+                            message=f"Feature {feat.id} declares state_machine but has no transitions defined.",
+                            suggested_fix="Define at least one StateTransition in state_machine.",
                         )
+                    )
+                else:
+                    for trans in feat.state_machine:
+                        if trans.from_state == trans.to_state:
+                            defects.append(
+                                ValidationDefect(
+                                    rule_code="ERR_FSM_INVALID_TRANSITION",
+                                    severity=DefectSeverity.BLOCKING,
+                                    target_agent="ProductArchitect",
+                                    target_item_id=feat.id,
+                                    message=(
+                                        f"Feature {feat.id} has invalid self-loop state transition "
+                                        f"where from_state == to_state ('{trans.from_state}')."
+                                    ),
+                                    suggested_fix="Ensure from_state and to_state represent distinct states.",
+                                )
+                            )
 
         # 5. Orphan requirement checks
         for req in state.requirements:
@@ -360,21 +372,33 @@ class DeterministicLinter:
                     )
                 )
 
-            # Upstream feature check
-            for up_id in tbl.upstream_ids:
-                if up_id not in feat_ids:
-                    defects.append(
-                        ValidationDefect(
-                            rule_code="ERR_INVALID_UPSTREAM_FEATURE",
-                            severity=DefectSeverity.BLOCKING,
-                            target_agent="DatabaseArchitect",
-                            target_item_id=tbl.id,
-                            message=f"Table '{tbl.table_name}' links to unknown feature '{up_id}'.",
-                            suggested_fix="Link upstream_ids to valid FEAT-* IDs.",
-                        )
+            # Upstream feature check: must not be empty and all IDs must exist in features
+            if len(tbl.upstream_ids) == 0:
+                defects.append(
+                    ValidationDefect(
+                        rule_code="ERR_INVALID_UPSTREAM_FEATURE",
+                        severity=DefectSeverity.BLOCKING,
+                        target_agent="DatabaseArchitect",
+                        target_item_id=tbl.id,
+                        message=f"Table '{tbl.table_name}' ({tbl.id}) has no upstream feature links.",
+                        suggested_fix="Link upstream_ids to at least one valid FEAT-* ID.",
                     )
-                else:
-                    covered_features.add(up_id)
+                )
+            else:
+                for up_id in tbl.upstream_ids:
+                    if up_id not in feat_ids:
+                        defects.append(
+                            ValidationDefect(
+                                rule_code="ERR_INVALID_UPSTREAM_FEATURE",
+                                severity=DefectSeverity.BLOCKING,
+                                target_agent="DatabaseArchitect",
+                                target_item_id=tbl.id,
+                                message=f"Table '{tbl.table_name}' links to unknown feature '{up_id}'.",
+                                suggested_fix="Link upstream_ids to valid FEAT-* IDs.",
+                            )
+                        )
+                    else:
+                        covered_features.add(up_id)
 
             # Foreign key source and relationship checks
             for rel in tbl.relationships:
@@ -443,19 +467,31 @@ class DeterministicLinter:
         # 3. Endpoint checks
         valid_ep_upstreams = feat_ids.union(table_ids)
         for ep in state.endpoints:
-            # Actor permissions check
-            for act_id in ep.allowed_actor_ids:
-                if act_id not in actor_ids:
-                    defects.append(
-                        ValidationDefect(
-                            rule_code="ERR_UNKNOWN_ACTOR_PERMISSION",
-                            severity=DefectSeverity.BLOCKING,
-                            target_agent="APIArchitect",
-                            target_item_id=ep.id,
-                            message=f"Endpoint '{ep.http_method} {ep.path}' permits unknown actor '{act_id}'.",
-                            suggested_fix="Use valid ACT-* IDs from state.actors.",
-                        )
+            # Actor permissions check: must not be empty and all IDs must exist in actors
+            if len(ep.allowed_actor_ids) == 0:
+                defects.append(
+                    ValidationDefect(
+                        rule_code="ERR_UNKNOWN_ACTOR_PERMISSION",
+                        severity=DefectSeverity.BLOCKING,
+                        target_agent="APIArchitect",
+                        target_item_id=ep.id,
+                        message=f"Endpoint '{ep.http_method} {ep.path}' ({ep.id}) has no allowed actors declared.",
+                        suggested_fix="Add at least one valid Actor.id to allowed_actor_ids.",
                     )
+                )
+            else:
+                for act_id in ep.allowed_actor_ids:
+                    if act_id not in actor_ids:
+                        defects.append(
+                            ValidationDefect(
+                                rule_code="ERR_UNKNOWN_ACTOR_PERMISSION",
+                                severity=DefectSeverity.BLOCKING,
+                                target_agent="APIArchitect",
+                                target_item_id=ep.id,
+                                message=f"Endpoint '{ep.http_method} {ep.path}' permits unknown actor '{act_id}'.",
+                                suggested_fix="Use valid ACT-* IDs from state.actors.",
+                            )
+                        )
 
             # Upstream links check: must reference >= 1 valid FEAT-* and >= 1 valid TBL-*
             if not ep.upstream_ids:

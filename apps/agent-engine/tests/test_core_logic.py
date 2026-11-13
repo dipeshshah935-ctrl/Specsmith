@@ -332,6 +332,14 @@ class TestGate1Linter:
         assert err.severity == DefectSeverity.BLOCKING
         assert err.target_item_id == "FEAT-01"
 
+    def test_catches_fsm_empty_transition_list(self, clean_blueprint_state):
+        clean_blueprint_state.features[0].state_machine = []
+        defects = DeterministicLinter.lint_gate_1(clean_blueprint_state)
+        err = next((d for d in defects if d.rule_code == "ERR_FSM_INVALID_TRANSITION"), None)
+        assert err is not None
+        assert err.severity == DefectSeverity.BLOCKING
+        assert err.target_item_id == "FEAT-01"
+
 
 # =====================================================================
 # 3. DETERMINISTIC LINTER: GATE 2 TESTS
@@ -366,6 +374,22 @@ class TestGate2Linter:
         assert err is not None
         assert err.severity == DefectSeverity.BLOCKING
         assert err.target_agent == "DatabaseArchitect"
+
+    def test_catches_empty_upstream_ids_in_database_entity(self, clean_blueprint_state):
+        clean_blueprint_state.database_entities[0].upstream_ids = []
+        defects = DeterministicLinter.lint_gate_2(clean_blueprint_state)
+        err = next((d for d in defects if d.rule_code == "ERR_INVALID_UPSTREAM_FEATURE"), None)
+        assert err is not None
+        assert err.severity == DefectSeverity.BLOCKING
+        assert err.target_agent == "DatabaseArchitect"
+
+    def test_catches_empty_allowed_actor_ids_in_endpoint(self, clean_blueprint_state):
+        clean_blueprint_state.endpoints[0].allowed_actor_ids = []
+        defects = DeterministicLinter.lint_gate_2(clean_blueprint_state)
+        err = next((d for d in defects if d.rule_code == "ERR_UNKNOWN_ACTOR_PERMISSION"), None)
+        assert err is not None
+        assert err.severity == DefectSeverity.BLOCKING
+        assert err.target_agent == "APIArchitect"
 
     def test_catches_dangling_foreign_key(self, clean_blueprint_state):
         clean_blueprint_state.database_entities[1].relationships[0].references_entity = "non_existent_table"

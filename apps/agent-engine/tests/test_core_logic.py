@@ -306,6 +306,32 @@ class TestGate1Linter:
         assert err.severity == DefectSeverity.WARNING
         assert err.target_item_id == "FEAT-01"
 
+    def test_catches_duplicate_id_in_gate_1(self, clean_blueprint_state):
+        clean_blueprint_state.actors.append(clean_blueprint_state.actors[0].model_copy())
+        defects = DeterministicLinter.lint_gate_1(clean_blueprint_state)
+        err = next((d for d in defects if d.rule_code == "ERR_DUPLICATE_ID"), None)
+        assert err is not None
+        assert err.severity == DefectSeverity.BLOCKING
+        assert err.target_item_id == "ACT-01"
+
+    def test_catches_empty_glossary_as_warning(self, clean_blueprint_state):
+        clean_blueprint_state.glossary = []
+        defects = DeterministicLinter.lint_gate_1(clean_blueprint_state)
+        err = next((d for d in defects if d.rule_code == "ERR_EMPTY_GLOSSARY"), None)
+        assert err is not None
+        assert err.severity == DefectSeverity.WARNING
+        assert err.target_agent == "RequirementAnalyst"
+
+    def test_catches_fsm_self_loop_transition(self, clean_blueprint_state):
+        clean_blueprint_state.features[0].state_machine = [
+            StateTransition(from_state="PENDING", to_state="PENDING", trigger_action="RETRY")
+        ]
+        defects = DeterministicLinter.lint_gate_1(clean_blueprint_state)
+        err = next((d for d in defects if d.rule_code == "ERR_FSM_INVALID_TRANSITION"), None)
+        assert err is not None
+        assert err.severity == DefectSeverity.BLOCKING
+        assert err.target_item_id == "FEAT-01"
+
 
 # =====================================================================
 # 3. DETERMINISTIC LINTER: GATE 2 TESTS
@@ -406,6 +432,40 @@ class TestGate2Linter:
         assert err is not None
         assert err.severity == DefectSeverity.WARNING
 
+    def test_catches_duplicate_table_or_endpoint(self, clean_blueprint_state):
+        # Duplicate table ID
+        clean_blueprint_state.database_entities.append(clean_blueprint_state.database_entities[0].model_copy())
+        defects = DeterministicLinter.lint_gate_2(clean_blueprint_state)
+        err = next((d for d in defects if d.rule_code == "ERR_DUPLICATE_TABLE_OR_ENDPOINT"), None)
+        assert err is not None
+        assert err.severity == DefectSeverity.BLOCKING
+
+    def test_catches_invalid_fk_source_column(self, clean_blueprint_state):
+        clean_blueprint_state.database_entities[1].relationships[0].foreign_key_column = "non_existent_col"
+        defects = DeterministicLinter.lint_gate_2(clean_blueprint_state)
+        err = next((d for d in defects if d.rule_code == "ERR_INVALID_FK_SOURCE_COLUMN"), None)
+        assert err is not None
+        assert err.severity == DefectSeverity.BLOCKING
+        assert err.target_item_id == "TBL-02"
+
+    def test_catches_endpoint_missing_table_link(self, clean_blueprint_state):
+        # Endpoint links only to FEAT-01, missing TBL link
+        clean_blueprint_state.endpoints[0].upstream_ids = ["FEAT-01"]
+        defects = DeterministicLinter.lint_gate_2(clean_blueprint_state)
+        err = next((d for d in defects if d.rule_code == "ERR_ORPHAN_ENDPOINT"), None)
+        assert err is not None
+        assert err.severity == DefectSeverity.BLOCKING
+        assert "must reference at least one valid FEAT-* ID and at least one valid TBL-* ID" in err.message
+
+    def test_catches_endpoint_missing_feature_link(self, clean_blueprint_state):
+        # Endpoint links only to TBL-01, missing FEAT link
+        clean_blueprint_state.endpoints[0].upstream_ids = ["TBL-01"]
+        defects = DeterministicLinter.lint_gate_2(clean_blueprint_state)
+        err = next((d for d in defects if d.rule_code == "ERR_ORPHAN_ENDPOINT"), None)
+        assert err is not None
+        assert err.severity == DefectSeverity.BLOCKING
+        assert "must reference at least one valid FEAT-* ID and at least one valid TBL-* ID" in err.message
+
 
 # =====================================================================
 # 4. TRACEABILITY COVERAGE TESTS
@@ -422,6 +482,15 @@ class TestTraceabilityCoverage:
         clean_blueprint_state.features = [clean_blueprint_state.features[0]]  # covers only REQ-01
         cov = DeterministicLinter.calculate_traceability_coverage(clean_blueprint_state, "GATE_1")
         assert cov == 50.0
+        assert DeterministicLinter.calculate_gate_1_coverage(clean_blueprint_state) == 50.0
+
+    def test_calculate_gate_2_coverage(self, clean_blueprint_state):
+        cov = DeterministicLinter.calculate_gate_2_coverage(clean_blueprint_state)
+        assert cov == 100.0
+        # If FEAT-02 is not referenced by an endpoint
+        clean_blueprint_state.endpoints = [clean_blueprint_state.endpoints[0]]  # only covers FEAT-01
+        cov_partial = DeterministicLinter.calculate_gate_2_coverage(clean_blueprint_state)
+        assert cov_partial == 50.0
 
 
 # =====================================================================

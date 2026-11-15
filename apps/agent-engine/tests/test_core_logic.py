@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 import pytest
+from pydantic import ValidationError
 
 from app.schemas import (
     Actor,
@@ -229,6 +230,27 @@ class TestSchemas:
         assert restored.requirements[0].id == "REQ-01"
         assert restored.database_entities[1].relationships[0].references_entity == "orders"
 
+    def test_schema_rejects_invalid_id_prefixes_and_extra_fields(self):
+        # 1. Invalid ID prefix on Actor
+        with pytest.raises(ValidationError):
+            Actor(id="bad-actor", name="Admin", description="desc", permissions_summary=[])
+
+        # 2. Invalid ID prefix on Requirement
+        with pytest.raises(ValidationError):
+            Requirement(id="REQ-1", actor_id="ACT-01", title="Title", description="desc", priority=Priority.MUST_HAVE, acceptance_criteria=["AC1"])
+
+        # 3. Invalid table name (non-snake_case)
+        with pytest.raises(ValidationError):
+            DatabaseEntity(id="TBL-01", table_name="NotSnakeCase", columns=[ColumnDefinition(name="id", data_type="int")])
+
+        # 4. Invalid endpoint path
+        with pytest.raises(ValidationError):
+            EndpointSpec(id="EP-01", http_method="GET", path="/invalid/path", summary="desc")
+
+        # 5. extra="forbid" rejects hallucinated fields
+        with pytest.raises(ValidationError):
+            Actor(id="ACT-01", name="Admin", description="desc", permissions_summary=[], hallucinated_field="extra")
+
 
 # =====================================================================
 # 2. DETERMINISTIC LINTER: GATE 1 TESTS
@@ -339,6 +361,32 @@ class TestGate1Linter:
         assert err is not None
         assert err.severity == DefectSeverity.BLOCKING
         assert err.target_item_id == "FEAT-01"
+
+    def test_gate_1_catches_duplicate_ids_empty_glossary_and_self_loop_fsm(self, clean_blueprint_state):
+        # 1. Duplicate requirement ID
+        clean_blueprint_state.requirements.append(clean_blueprint_state.requirements[0].model_copy())
+        # 2. Empty glossary
+        clean_blueprint_state.glossary = []
+        # 3. FSM self loop
+        clean_blueprint_state.features[0].state_machine = [
+            StateTransition(from_state="DRAFT", to_state="DRAFT", trigger_action="NOOP")
+        ]
+        defects = DeterministicLinter.lint_gate_1(clean_blueprint_state)
+
+        dup_err = next((d for d in defects if d.rule_code == "ERR_DUPLICATE_ID"), None)
+        assert dup_err is not None
+        assert dup_err.severity == DefectSeverity.BLOCKING
+        assert dup_err.target_agent == "RequirementAnalyst"
+
+        gloss_err = next((d for d in defects if d.rule_code == "ERR_EMPTY_GLOSSARY"), None)
+        assert gloss_err is not None
+        assert gloss_err.severity == DefectSeverity.WARNING
+        assert gloss_err.target_agent == "RequirementAnalyst"
+
+        fsm_err = next((d for d in defects if d.rule_code == "ERR_FSM_INVALID_TRANSITION"), None)
+        assert fsm_err is not None
+        assert fsm_err.severity == DefectSeverity.BLOCKING
+        assert fsm_err.target_agent == "ProductArchitect"
 
 
 # =====================================================================
@@ -490,6 +538,31 @@ class TestGate2Linter:
         assert err.severity == DefectSeverity.BLOCKING
         assert "must reference at least one valid FEAT-* ID and at least one valid TBL-* ID" in err.message
 
+    def test_gate_2_catches_duplicates_invalid_fk_source_and_single_layer_endpoint(self, clean_blueprint_state):
+        # 1. Duplicate table
+        clean_blueprint_state.database_entities.append(clean_blueprint_state.database_entities[0].model_copy())
+        # 2. Invalid FK source column
+        clean_blueprint_state.database_entities[1].relationships[0].foreign_key_column = "missing_source_col"
+        # 3. Single-layer endpoint: links only to TBL-01 without any FEAT-*
+        clean_blueprint_state.endpoints[0].upstream_ids = ["TBL-01"]
+
+        defects = DeterministicLinter.lint_gate_2(clean_blueprint_state)
+
+        dup_err = next((d for d in defects if d.rule_code == "ERR_DUPLICATE_TABLE_OR_ENDPOINT"), None)
+        assert dup_err is not None
+        assert dup_err.severity == DefectSeverity.BLOCKING
+
+        fk_err = next((d for d in defects if d.rule_code == "ERR_INVALID_FK_SOURCE_COLUMN"), None)
+        assert fk_err is not None
+        assert fk_err.severity == DefectSeverity.BLOCKING
+        assert fk_err.target_agent == "DatabaseArchitect"
+
+        orphan_err = next((d for d in defects if d.rule_code == "ERR_ORPHAN_ENDPOINT"), None)
+        assert orphan_err is not None
+        assert orphan_err.severity == DefectSeverity.BLOCKING
+        assert orphan_err.target_agent == "APIArchitect"
+        assert "must reference at least one valid FEAT-* ID and at least one valid TBL-* ID" in orphan_err.message
+
 
 # =====================================================================
 # 4. TRACEABILITY COVERAGE TESTS
@@ -617,4 +690,36 @@ class TestDAGChangePropagator:
         assert merged[1].title == "R2-Updated"  # Stale updated
         assert merged[2].title == "R3"  # Untouched preserved
         assert merged[3].title == "R4-BrandNew"  # Brand-new appended
+
+    def test_dag_blast_radius_stale_requirements_and_transitive_fk(self, clean_blueprint_state):
+        # 1. Modifying ACT-02 populates stale_requirements (REQ-01 belongs to ACT-02)
+        act_blast = DAGChangePropagator.compute_blast_radius(clean_blueprint_state, {"ACT-02"})
+        assert "REQ-01" in act_blast["stale_requirements"]
+        assert "REQ-02" not in act_blast["stale_requirements"]
+        assert "FEAT-01" in act_blast["stale_features"]
+
+        # 2. Modifying TBL-01 marks TBL-02 stale via its foreign key relationship referencing orders (TBL-01)
+        tbl_blast = DAGChangePropagator.compute_blast_radius(clean_blueprint_state, {"TBL-01"})
+        assert "TBL-01" in tbl_blast["stale_tables"]
+        assert "TBL-02" in tbl_blast["stale_tables"]
+
+    def test_merge_regenerated_slice_preserves_untouched_and_sorts(self):
+        existing = [
+            Feature(id="FEAT-01", upstream_ids=["REQ-01"], module_name="M1", name="F1", description="D1", happy_path=["H1"]),
+            Feature(id="FEAT-02", upstream_ids=["REQ-01"], module_name="M1", name="F2", description="D2", happy_path=["H2"]),
+            Feature(id="FEAT-03", upstream_ids=["REQ-01"], module_name="M1", name="F3", description="D3", happy_path=["H3"]),
+        ]
+        stale_ids = {"FEAT-02"}
+        new_items = [
+            Feature(id="FEAT-04", upstream_ids=["REQ-01"], module_name="M1", name="F4", description="D4", happy_path=["H4"]),
+            Feature(id="FEAT-02", upstream_ids=["REQ-01"], module_name="M1", name="F2-Updated", description="D2-Updated", happy_path=["H2"]),
+        ]
+
+        merged = DAGChangePropagator.merge_regenerated_slice(existing, new_items, stale_ids)
+
+        assert [f.id for f in merged] == ["FEAT-01", "FEAT-02", "FEAT-03", "FEAT-04"]
+        assert merged[0].name == "F1"  # Preserved untouched
+        assert merged[1].name == "F2-Updated"  # Stale updated
+        assert merged[2].name == "F3"  # Preserved untouched
+        assert merged[3].name == "F4"  # Brand-new appended
 

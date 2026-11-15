@@ -591,3 +591,30 @@ class TestDAGChangePropagator:
         next_state.features[0].name = "Mutated in V2"
         assert clean_blueprint_state.features[0].name != "Mutated in V2"
 
+    def test_dag_blast_radius_transitive_fk_propagation(self, clean_blueprint_state):
+        """If TBL-01 is modified, TBL-02 which has a FK referencing TBL-01 should also become stale."""
+        blast = DAGChangePropagator.compute_blast_radius(clean_blueprint_state, {"TBL-01"})
+        assert "TBL-01" in blast["stale_tables"]
+        assert "TBL-02" in blast["stale_tables"]  # Transitive FK dependency
+
+    def test_merge_regenerated_slice_preserves_untouched_items(self, clean_blueprint_state):
+        """merge_regenerated_slice should preserve untouched items, replace stale ones, and sort by ID."""
+        existing = [
+            Requirement(id="REQ-01", actor_id="ACT-01", title="R1", description="D1", priority=Priority.MUST_HAVE, acceptance_criteria=["AC1"]),
+            Requirement(id="REQ-02", actor_id="ACT-01", title="R2", description="D2", priority=Priority.MUST_HAVE, acceptance_criteria=["AC2"]),
+            Requirement(id="REQ-03", actor_id="ACT-01", title="R3", description="D3", priority=Priority.MUST_HAVE, acceptance_criteria=["AC3"]),
+        ]
+        stale_ids = {"REQ-02"}
+        new_items = [
+            Requirement(id="REQ-02", actor_id="ACT-01", title="R2-Updated", description="D2-Updated", priority=Priority.MUST_HAVE, acceptance_criteria=["AC2-New"]),
+            Requirement(id="REQ-04", actor_id="ACT-01", title="R4-BrandNew", description="D4", priority=Priority.SHOULD_HAVE, acceptance_criteria=["AC4"]),
+        ]
+
+        merged = DAGChangePropagator.merge_regenerated_slice(existing, new_items, stale_ids)
+
+        assert [r.id for r in merged] == ["REQ-01", "REQ-02", "REQ-03", "REQ-04"]
+        assert merged[0].title == "R1"  # Untouched preserved
+        assert merged[1].title == "R2-Updated"  # Stale updated
+        assert merged[2].title == "R3"  # Untouched preserved
+        assert merged[3].title == "R4-BrandNew"  # Brand-new appended
+

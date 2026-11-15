@@ -12,7 +12,7 @@ class EngineSettings(BaseSettings):
         extra="ignore",
     )
 
-    USE_MOCK_LLM: bool = True
+    USE_MOCK_LLM: bool = False
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL: str = "gemini-2.5-flash"
     MONGODB_URI: Optional[str] = None
@@ -24,4 +24,3 @@ class EngineSettings(BaseSettings):
         if not self.USE_MOCK_LLM and not self.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY is required when USE_MOCK_LLM=False")
         return self
-

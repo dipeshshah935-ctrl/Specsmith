@@ -183,3 +183,4 @@ class TestSelectiveRegeneration:
         revised_eps = [e for e in v2_state.endpoints if f"[Revised: {human_notes}]" in e.summary]
         assert len(revised_eps) > 0
         assert any(e.id == "EP-01" for e in revised_eps)
+

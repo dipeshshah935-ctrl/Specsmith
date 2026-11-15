@@ -96,12 +96,9 @@ Every part of this platform enforces formal Software Engineering principles at t
 
 ```
 blueprint-engine/
-├── GEMINI.md                                # Antigravity persistent workspace rules
-├── README.md                                # Master project overview & implementation plan
+├── README.md                                # Master project overview & architecture specification
 ├── docker-compose.yml                       # Local MongoDB + FastAPI + Express + React
 ├── .env.example                             # Environment variables template
-├── docs/
-│   └── ARCHITECTURE_SPEC.md                 # Canonical schemas, prompts, and state machine reference
 ├── apps/
 │   ├── agent-engine/                        # PYTHON 3.12 SERVICE (Port 8000)
 │   │   ├── pyproject.toml                   # FastAPI, LangGraph, Pydantic v2, Motor/PyMongo, Pytest
@@ -272,9 +269,9 @@ When a human reviewer pauses at **Checkpoint 1** or **Checkpoint 2** and request
 | **Express** | `POST /api/projects/:id/review` | `{ "action": "APPROVE" | "REVISE", "modified_ids": [], "feedback_notes": "str" }` | `{ "project_id": "str", "state": ProjectBlueprintState }` | Calls FastAPI `/orchestrator/:id/resume`, archives new version snapshot in MongoDB `project_snapshots` collection. | 
 | **Express** | `GET /api/projects/:id/versions` | None | `List[ProjectBlueprintState]` (`v1`, `v2`, ...) | Reads all immutable snapshots for side-by-side diffing in the React UI. | 
 
-## 8. Detailed Step-by-Step Antigravity Implementation Plan
+## 8. Step-by-Step Engineering Implementation Roadmap
 
-To build this entire system cleanly in **Antigravity** without context overload or cross-file import bugs, execute the following **6 Vertical Slices** in strict order. Do not advance to the next slice until the current slice's verification command passes 100%.
+To build this entire system with strict modularity and high reliability, the architecture is engineered across **6 Vertical Slices** in strict order. Each slice must pass its automated verification and test suite 100% before integrating downstream services.
 
 ### Slice 1: Python Core Data Contracts, Static Linter & DAG Propagator
 
@@ -282,11 +279,11 @@ To build this entire system cleanly in **Antigravity** without context overload 
 
 * **Files to Create:**
 
-  1. `apps/agent-engine/pyproject.toml` (Dependencies: `fastapi`, `uvicorn`, `pydantic>=2.7`, `langgraph`, `langchain-core`, ` langchain-google-genai`, `pymongo`, `pytest`, `httpx`)
+  1. `apps/agent-engine/pyproject.toml` (Dependencies: `fastapi`, `uvicorn`, `pydantic>=2.7`, `langgraph`, `langchain-core`, `langchain-google-genai`, `pymongo`, `pytest`, `httpx`)
 
   2. `apps/agent-engine/app/__init__.py`
 
-  3. `apps/agent-engine/app/schemas.py` (Full Pydantic v2 models from `docs/ARCHITECTURE_SPEC.md`)
+  3. `apps/agent-engine/app/schemas.py` (Full Pydantic v2 models: `ProjectBlueprintState`, `Requirement`, `Feature`, `DatabaseEntity`, `EndpointSpec`)
 
   4. `apps/agent-engine/app/linter.py` (`DeterministicLinter.lint_gate_1` and `lint_gate_2` implementing all Tier 1 rules + `calculate_traceability_coverage`)
 
@@ -304,9 +301,8 @@ To build this entire system cleanly in **Antigravity** without context overload 
 
   * Verify `DAGChangePropagator.compute_blast_radius` accurately marks only downstream `FEAT-*`, `TBL-*`, and `EP-*` items when a single `REQ-01` is modified, leaving `REQ-02` branches untouched.
 
-* **Antigravity Prompt for Slice 1:**
-
-  > Read `GEMINI.md`, `README.md`, and `docs/ARCHITECTURE_SPEC.md`. Implement **Slice 1** inside `apps/agent-engine/`: create `pyproject.toml`, `app/schemas.py`, `app/linter.py`, `app/propagator.py`, and `tests/test_core_logic.py`. Run `pytest apps/agent-engine/tests/test_core_logic.py -v` and ensure 100% of tests pass.
+* **Slice 1 Verification:**
+  Run `pytest apps/agent-engine/tests/test_core_logic.py -v` and ensure 100% of tests pass.
 
 ### Slice 2: The 5 Domain Agents with Dual-Mode Execution (`USE_MOCK_LLM` + Live Structured Outputs)
 
@@ -338,9 +334,8 @@ To build this entire system cleanly in **Antigravity** without context overload 
 
   * Test selective regeneration: pass a `blast_radius` containing `{"stale_features": {"FEAT-01"}}` to `run_product_architect` and verify that `FEAT-02` remains untouched while `FEAT-01` is updated.
 
-* **Antigravity Prompt for Slice 2:**
-
-  > Read `GEMINI.md` and `docs/ARCHITECTURE_SPEC.md`. Implement **Slice 2** in `apps/agent-engine/app/agents/` (`base.py`, `req_analyst.py`, `product_arch.py`, `db_arch.py`, `api_arch.py`, `validator_critic.py`) and `app/config.py`. Ensure every agent enforces its exact Read/Write contract, supports selective updates when `blast_radius` is present, and supports `USE_MOCK_LLM=true`. Write and run `pytest apps/agent-engine/tests/test_agents.py -v`.
+* **Slice 2 Verification:**
+  Run `pytest apps/agent-engine/tests/test_agents.py -v` and ensure 100% of agent tests pass.
 
 ### Slice 3: LangGraph Orchestrator State Machine, Checkpoints & FastAPI Endpoints
 
@@ -362,9 +357,8 @@ To build this entire system cleanly in **Antigravity** without context overload 
 
   * **Flow 3 (Auto-Retry Circuit Breaker):** Inject a deliberate blocking defect in mock mode and verify the conditional edge retries at most `MAX_AUTO_RETRIES = 2` times before escalating to the human checkpoint.
 
-* **Antigravity Prompt for Slice 3:**
-
-  > Read `GEMINI.md` and `docs/ARCHITECTURE_SPEC.md`. Implement **Slice 3**: create `app/orchestrator.py` and `app/main.py` in `apps/agent-engine/`, plus end-to-end state machine tests in `tests/test_orchestrator_flow.py` covering happy path, cross-phase human revision rollback (`v1` to `v2`), and the `MAX_AUTO_RETRIES = 2` circuit breaker. Run `pytest apps/agent-engine/tests/ -v`.
+* **Slice 3 Verification:**
+  Run `pytest apps/agent-engine/tests/test_orchestrator_flow.py -v` and verify end-to-end state machine workflows.
 
 ### Slice 4: Node.js + Express API Gateway & MongoDB Snapshot Persistence
 
@@ -386,9 +380,8 @@ To build this entire system cleanly in **Antigravity** without context overload 
 
   7. `apps/api-gateway/tests/projects.test.ts`
 
-* **Antigravity Prompt for Slice 4:**
-
-  > Read `GEMINI.md` and `README.md`. Implement **Slice 4** in `apps/api-gateway/` using Node.js, Express, and TypeScript. Create the Mongoose snapshot model, the typed `pythonBridge.ts` service talking to FastAPI (`http://localhost:8000`), and the `/api/projects` routes (`POST /`, `GET /:id`, `POST /:id/review`, `GET /:id/versions`) with RFC 7807 error formatting. Verify TypeScript compilation (`npx tsc --noEmit`) and route tests.
+* **Slice 4 Verification:**
+  Run `npm test` and `npx tsc --noEmit` inside `apps/api-gateway/` to verify TypeScript typing and Gateway integration.
 
 ### Slice 5: React Blueprint Studio, Artifact Cards & Human Checkpoint Drawer
 
@@ -412,9 +405,8 @@ To build this entire system cleanly in **Antigravity** without context overload 
 
   8. `apps/web/src/pages/ProjectWorkspace.tsx`
 
-* **Antigravity Prompt for Slice 5:**
-
-  > Read `GEMINI.md` and `README.md`. Implement **Slice 5** in `apps/web/` using React, Vite, TypeScript, and Tailwind CSS. Build `types/blueprint.ts`, `api/projectsApi.ts`, `PhaseStepper.tsx`, `ArtifactTabs.tsx`, `ValidationBanner.tsx`, `CheckpointDrawer.tsx`, and `ProjectWorkspace.tsx`. Verify with `npm run build` that there are zero TypeScript or bundler errors.
+* **Slice 5 Verification:**
+  Run `npm run build` in `apps/web/` to verify clean frontend compilation.
 
 ### Slice 6: Interactive DAG Traceability Graph (`@xyflow/react`) & Version Diff Modal
 
@@ -428,6 +420,5 @@ To build this entire system cleanly in **Antigravity** without context overload 
 
   3. `docker-compose.yml` & `.env.example` at the monorepo root so the entire 4-container stack (`mongodb`, `agent-engine`, `api-gateway`, `web`) launches with a single `docker compose up --build`.
 
-* **Antigravity Prompt for Slice 6:**
-
-  > Read `GEMINI.md` and `README.md`. Implement **Slice 6**: build `TraceabilityGraph.tsx` using `@xyflow/react` with live downstream blast-radius highlighting, build `VersionDiffModal.tsx` for comparing blueprint versions (`v1` vs `v2`), integrate both into `ProjectWorkspace.tsx`, and add `docker-compose.yml` and `.env.example` at the repository root. Verify with `npm run build` in `apps/web`.
+* **Slice 6 Verification:**
+  Launch the complete platform with `docker compose up --build` and verify end-to-end system operation.

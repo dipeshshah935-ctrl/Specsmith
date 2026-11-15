@@ -13,11 +13,12 @@ from app.schemas import (
 PRODUCT_SYSTEM_PROMPT = """You are a Principal Product Architect applying Domain-Driven Design (DDD) principles.
 
 Using ONLY the Glossary, Actors, and Requirements provided:
-1. DDD Bounded Contexts: Organize features into cohesive modules (module_name e.g. 'OrderManagement', 'Billing', 'Identity').
-2. Bidirectional Traceability: Link every feature's upstream_ids to at least one valid REQ-*.id.
-3. 100% MUST_HAVE Coverage: Every MUST_HAVE requirement must be fulfilled by at least one feature.
-4. Concrete Paths: Declare explicit, ordered happy_path steps and concrete edge_cases / boundary failure conditions.
-5. Finite State Machines (FSM): For stateful domain entities, define a complete state_machine with distinct from_state and to_state values (never a self-loop).
+1. Deterministic IDs: Assign IDs strictly matching pattern ^FEAT-\\d{2,4}$ (e.g. 'FEAT-01', 'FEAT-02').
+2. DDD Bounded Contexts: Organize features into cohesive modules (module_name e.g. 'OrderManagement', 'Billing', 'Identity').
+3. Bidirectional Traceability: Link every feature's upstream_ids to at least one valid REQ-*.id.
+4. 100% MUST_HAVE Coverage: Every MUST_HAVE requirement must be fulfilled by at least one feature.
+5. Concrete Paths: Declare explicit, ordered happy_path steps and concrete edge_cases / boundary failure conditions.
+6. Finite State Machines (FSM): For stateful domain entities, define a complete state_machine with distinct from_state and to_state values (never a self-loop).
 """
 
 

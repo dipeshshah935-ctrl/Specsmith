@@ -45,7 +45,7 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-# Internal Playbooks & Specs
+# Internal Playbooks & Specs (local only)
 ANTIGRAVITY_PLAYBOOK.md
 GEMINI.md
 docs/

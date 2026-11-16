@@ -277,7 +277,7 @@ To build this entire system with strict modularity and high reliability, the arc
 
 * **Goal:** Establish the mathematical and schema foundation of the platform with zero LLM calls required.
 
-* **Files to Create:**
+* **Files Created:**
 
   1. `apps/agent-engine/pyproject.toml` (Dependencies: `fastapi`, `uvicorn`, `pydantic>=2.7`, `langgraph`, `langchain-core`, `langchain-google-genai`, `pymongo`, `pytest`, `httpx`)
 
@@ -291,7 +291,7 @@ To build this entire system with strict modularity and high reliability, the arc
 
   6. `apps/agent-engine/tests/test_core_logic.py`
 
-* **Unit Tests Required in `test_core_logic.py`:**
+* **Unit Tests in `test_core_logic.py`:**
 
   * Verify valid `ProjectBlueprintState` serialization and deserialization.
 
@@ -301,14 +301,13 @@ To build this entire system with strict modularity and high reliability, the arc
 
   * Verify `DAGChangePropagator.compute_blast_radius` accurately marks only downstream `FEAT-*`, `TBL-*`, and `EP-*` items when a single `REQ-01` is modified, leaving `REQ-02` branches untouched.
 
-* **Slice 1 Verification:**
-  Run `pytest apps/agent-engine/tests/test_core_logic.py -v` and ensure 100% of tests pass.
+* **Verification:** Run `pytest apps/agent-engine/tests/test_core_logic.py -v`.
 
 ### Slice 2: The 5 Domain Agents with Dual-Mode Execution (`USE_MOCK_LLM` + Live Structured Outputs)
 
 * **Goal:** Implement all 5 domain agents with strict Read/Write slice isolation, embedded SE guardrails, and an offline deterministic mock mode for instant CI testing.
 
-* **Files to Create:**
+* **Files Created:**
 
   1. `apps/agent-engine/app/config.py` (Settings loader reading `USE_MOCK_LLM`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `MONGODB_URI`)
 
@@ -328,14 +327,13 @@ To build this entire system with strict modularity and high reliability, the arc
 
   9. `apps/agent-engine/tests/test_agents.py`
 
-* **Unit Tests Required in `test_agents.py`:**
+* **Unit Tests in `test_agents.py`:**
 
   * Test each agent in `USE_MOCK_LLM=true` mode to confirm its output passes Pydantic validation and satisfies Tier 1 linter rules.
 
   * Test selective regeneration: pass a `blast_radius` containing `{"stale_features": {"FEAT-01"}}` to `run_product_architect` and verify that `FEAT-02` remains untouched while `FEAT-01` is updated.
 
-* **Slice 2 Verification:**
-  Run `pytest apps/agent-engine/tests/test_agents.py -v` and ensure 100% of agent tests pass.
+* **Verification:** Run `pytest apps/agent-engine/tests/test_agents.py -v`.
 
 ### Slice 3: LangGraph Orchestrator State Machine, Checkpoints & FastAPI Endpoints
 
@@ -349,7 +347,7 @@ To build this entire system with strict modularity and high reliability, the arc
 
   3. `apps/agent-engine/tests/test_orchestrator_flow.py`
 
-* **Integration Tests Required in `test_orchestrator_flow.py`:**
+* **Integration Tests in `test_orchestrator_flow.py`:**
 
   * **Flow 1 (Happy Path):** Start project $\rightarrow$ pause at `GATE_1_REVIEW` $\rightarrow$ resume with `APPROVE` $\rightarrow$ pause at `GATE_2_REVIEW` $\rightarrow$ resume with `APPROVE` $\rightarrow$ verify `current_phase == COMPLETED` and `human_approved == True`.
 
@@ -357,8 +355,7 @@ To build this entire system with strict modularity and high reliability, the arc
 
   * **Flow 3 (Auto-Retry Circuit Breaker):** Inject a deliberate blocking defect in mock mode and verify the conditional edge retries at most `MAX_AUTO_RETRIES = 2` times before escalating to the human checkpoint.
 
-* **Slice 3 Verification:**
-  Run `pytest apps/agent-engine/tests/test_orchestrator_flow.py -v` and verify end-to-end state machine workflows.
+* **Verification:** Run `pytest apps/agent-engine/tests/test_orchestrator_flow.py -v`.
 
 ### Slice 4: Node.js + Express API Gateway & MongoDB Snapshot Persistence
 
@@ -380,8 +377,7 @@ To build this entire system with strict modularity and high reliability, the arc
 
   7. `apps/api-gateway/tests/projects.test.ts`
 
-* **Slice 4 Verification:**
-  Run `npm test` and `npx tsc --noEmit` inside `apps/api-gateway/` to verify TypeScript typing and Gateway integration.
+* **Verification:** Run `npm test` and `npx tsc --noEmit` inside `apps/api-gateway/`.
 
 ### Slice 5: React Blueprint Studio, Artifact Cards & Human Checkpoint Drawer
 
@@ -405,8 +401,7 @@ To build this entire system with strict modularity and high reliability, the arc
 
   8. `apps/web/src/pages/ProjectWorkspace.tsx`
 
-* **Slice 5 Verification:**
-  Run `npm run build` in `apps/web/` to verify clean frontend compilation.
+* **Verification:** Run `npm run build` in `apps/web/`.
 
 ### Slice 6: Interactive DAG Traceability Graph (`@xyflow/react`) & Version Diff Modal
 
@@ -420,5 +415,4 @@ To build this entire system with strict modularity and high reliability, the arc
 
   3. `docker-compose.yml` & `.env.example` at the monorepo root so the entire 4-container stack (`mongodb`, `agent-engine`, `api-gateway`, `web`) launches with a single `docker compose up --build`.
 
-* **Slice 6 Verification:**
-  Launch the complete platform with `docker compose up --build` and verify end-to-end system operation.
+* **Verification:** Run `docker compose up --build` and verify end-to-end system operation.

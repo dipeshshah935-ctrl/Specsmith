@@ -131,10 +131,16 @@ def validation_gate_1_node(state: OrchestratorGraphState) -> Dict[str, Any]:
     retries = state.get("gate_1_retries", 0)
     if updated.validation_reports and updated.validation_reports[-1].status == ValidationStatus.FAILED:
         retries += 1
+    else:
+        updated.current_phase = ProjectPhase.GATE_1_REVIEW
+
+    updated_dict = updated.model_dump(mode="json")
+    version_history = _upsert_version_history(state.get("version_history", []), updated_dict)
 
     return {
-        "blueprint": updated.model_dump(mode="json"),
+        "blueprint": updated_dict,
         "gate_1_retries": retries,
+        "version_history": version_history,
     }
 
 
@@ -145,10 +151,16 @@ def validation_gate_2_node(state: OrchestratorGraphState) -> Dict[str, Any]:
     retries = state.get("gate_2_retries", 0)
     if updated.validation_reports and updated.validation_reports[-1].status == ValidationStatus.FAILED:
         retries += 1
+    else:
+        updated.current_phase = ProjectPhase.GATE_2_REVIEW
+
+    updated_dict = updated.model_dump(mode="json")
+    version_history = _upsert_version_history(state.get("version_history", []), updated_dict)
 
     return {
-        "blueprint": updated.model_dump(mode="json"),
+        "blueprint": updated_dict,
         "gate_2_retries": retries,
+        "version_history": version_history,
     }
 
 
@@ -269,6 +281,7 @@ def human_checkpoint_1_node(
         )
         blast_as_lists = {k: list(v) for k, v in blast.items()}
         revised_dict = next_state.model_dump(mode="json")
+        updated_history = _upsert_version_history(version_history, revised_dict)
 
         if any(mid.startswith("ACT-") or mid.startswith("REQ-") for mid in raw_mod_ids):
             target = "requirement_analyst"
@@ -283,7 +296,7 @@ def human_checkpoint_1_node(
                 "blueprint": revised_dict,
                 "gate_1_retries": 0,
                 "blast_radius": blast_as_lists,
-                "version_history": version_history,
+                "version_history": updated_history,
             },
         )
 
@@ -338,6 +351,7 @@ def human_checkpoint_2_node(
         )
         blast_as_lists = {k: list(v) for k, v in blast.items()}
         revised_dict = next_state.model_dump(mode="json")
+        updated_history = _upsert_version_history(version_history, revised_dict)
 
         if any(mid.startswith("ACT-") or mid.startswith("REQ-") for mid in raw_mod_ids):
             target = "requirement_analyst"
@@ -354,7 +368,7 @@ def human_checkpoint_2_node(
                 "blueprint": revised_dict,
                 "gate_2_retries": 0,
                 "blast_radius": blast_as_lists,
-                "version_history": version_history,
+                "version_history": updated_history,
             },
         )
 
@@ -416,3 +430,4 @@ def build_orchestrator_graph(checkpointer=None):
     )
 
     return builder.compile(checkpointer=checkpointer)
+

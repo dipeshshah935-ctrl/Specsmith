@@ -40,6 +40,12 @@ def invoke_structured_agent(
         HumanMessage(content=json.dumps(user_payload, indent=2, default=str)),
     ]
     result = structured_llm.invoke(messages)
+    if result is None:
+        # Retry once before failing
+        result = structured_llm.invoke(messages)
+        if result is None:
+            raise ValueError(f"Structured output model returned None for {schema_cls.__name__}")
+
     dumped_result = result.model_dump() if isinstance(result, BaseModel) else result
     return schema_cls.model_validate(dumped_result)
 

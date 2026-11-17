@@ -4,6 +4,7 @@ from app.config import EngineSettings
 from app.propagator import DAGChangePropagator
 from app.schemas import (
     APIArchitectOutput,
+    DTOField,
     EndpointSpec,
     HTTPMethod,
     ProjectBlueprintState,
@@ -19,7 +20,8 @@ Using ONLY the Glossary, Actors, Features, and Database Entities provided:
 4. Least Privilege RBAC: Declare allowed_actor_ids with at least one valid ACT-*.id matching who has authorization to invoke the route.
 5. Idempotency: Set is_idempotent=True on all GET, PUT, and DELETE routes, as well as on state-transition POST endpoints.
 6. RFC 7807 Error Responses: Declare standard HTTP error_codes applicable to the operation (e.g. [400, 401, 403, 404, 409]).
-7. Schemas: Provide request_dto_schema (when request body is expected) and response_dto_schema in valid JSON Schema format.
+7. Schemas: Provide request_dto_schema (when request body is expected) and response_dto_schema as a list of DTOField objects (name, field_type, required, description).
+8. Selective Regeneration & Defect Resolution: When stale_endpoints IDs are provided, regenerate ONLY those stale items while preserving their IDs. When retry_defects are provided, resolve every identified defect in the regenerated specifications.
 """
 
 
@@ -54,22 +56,14 @@ def _mock_api_architect(payload: Dict[str, Any]) -> APIArchitectOutput:
                 summary="Create and place a new customer order",
                 allowed_actor_ids=[actor_ids[1]] if len(actor_ids) > 1 else [actor_ids[0]],
                 is_idempotent=True,
-                request_dto_schema={
-                    "type": "object",
-                    "properties": {
-                        "customer_id": {"type": "string"},
-                        "items": {"type": "array"},
-                    },
-                    "required": ["customer_id", "items"],
-                },
-                response_dto_schema={
-                    "type": "object",
-                    "properties": {
-                        "order_id": {"type": "string"},
-                        "status": {"type": "string"},
-                    },
-                    "required": ["order_id", "status"],
-                },
+                request_dto_schema=[
+                    DTOField(name="customer_id", field_type="string", required=True, description="Customer UUID"),
+                    DTOField(name="items", field_type="array", required=True, description="Order item list"),
+                ],
+                response_dto_schema=[
+                    DTOField(name="order_id", field_type="string", required=True, description="Created order ID"),
+                    DTOField(name="status", field_type="string", required=True, description="Initial order status"),
+                ],
                 error_codes=[400, 401, 403, 404, 409],
             ),
             EndpointSpec(
@@ -81,13 +75,9 @@ def _mock_api_architect(payload: Dict[str, Any]) -> APIArchitectOutput:
                 allowed_actor_ids=actor_ids,
                 is_idempotent=True,
                 request_dto_schema=None,
-                response_dto_schema={
-                    "type": "object",
-                    "properties": {
-                        "order": {"type": "object"},
-                    },
-                    "required": ["order"],
-                },
+                response_dto_schema=[
+                    DTOField(name="order", field_type="object", required=True, description="Order details"),
+                ],
                 error_codes=[400, 401, 403, 404],
             ),
             EndpointSpec(
@@ -99,13 +89,9 @@ def _mock_api_architect(payload: Dict[str, Any]) -> APIArchitectOutput:
                 allowed_actor_ids=[actor_ids[0]],
                 is_idempotent=True,
                 request_dto_schema=None,
-                response_dto_schema={
-                    "type": "object",
-                    "properties": {
-                        "items": {"type": "array"},
-                    },
-                    "required": ["items"],
-                },
+                response_dto_schema=[
+                    DTOField(name="items", field_type="array", required=True, description="Order items list"),
+                ],
                 error_codes=[400, 401, 403, 404],
             ),
             EndpointSpec(
@@ -116,21 +102,13 @@ def _mock_api_architect(payload: Dict[str, Any]) -> APIArchitectOutput:
                 summary="Update order item quantity or parameters",
                 allowed_actor_ids=[actor_ids[0]],
                 is_idempotent=True,
-                request_dto_schema={
-                    "type": "object",
-                    "properties": {
-                        "quantity": {"type": "integer"},
-                    },
-                    "required": ["quantity"],
-                },
-                response_dto_schema={
-                    "type": "object",
-                    "properties": {
-                        "item_id": {"type": "string"},
-                        "status": {"type": "string"},
-                    },
-                    "required": ["item_id", "status"],
-                },
+                request_dto_schema=[
+                    DTOField(name="quantity", field_type="integer", required=True, description="Updated item quantity"),
+                ],
+                response_dto_schema=[
+                    DTOField(name="item_id", field_type="string", required=True, description="Order item ID"),
+                    DTOField(name="status", field_type="string", required=True, description="Update status"),
+                ],
                 error_codes=[400, 401, 403, 404, 409],
             ),
         ]

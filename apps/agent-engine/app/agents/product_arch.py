@@ -19,6 +19,7 @@ Using ONLY the Glossary, Actors, and Requirements provided:
 4. 100% MUST_HAVE Coverage: Every MUST_HAVE requirement must be fulfilled by at least one feature.
 5. Concrete Paths: Declare explicit, ordered happy_path steps and concrete edge_cases / boundary failure conditions.
 6. Finite State Machines (FSM): For stateful domain entities, define a complete state_machine with distinct from_state and to_state values (never a self-loop).
+7. Selective Regeneration & Defect Resolution: When stale_features IDs are provided, regenerate ONLY those stale items while preserving their IDs. When retry_defects are provided, resolve every identified defect in the regenerated specifications.
 """
 
 

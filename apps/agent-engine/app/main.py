@@ -11,18 +11,15 @@ from pydantic import BaseModel, Field
 
 from app.config import EngineSettings
 from app.orchestrator import build_orchestrator_graph
-from app.schemas import ProjectBlueprintState, ProjectPhase
+from app.schemas import ProjectBlueprintState, ProjectPhase, ValidationStatus
 
 # Global compiled orchestrator graph instance
 orchestrator_graph = None
 
 
 def get_settings() -> EngineSettings:
-    """Safely obtain EngineSettings, defaulting to mock mode if env variables are incomplete."""
-    try:
-        return EngineSettings()
-    except Exception:
-        return EngineSettings(USE_MOCK_LLM=True)
+    """Obtain EngineSettings."""
+    return EngineSettings()
 
 
 def get_graph():
@@ -113,6 +110,7 @@ class ResumeProjectRequest(BaseModel):
     action: Literal["APPROVE", "REVISE"]
     modified_ids: List[str] = Field(default_factory=list)
     feedback_notes: Optional[str] = None
+    force_approve: bool = False
 
 
 # =====================================================================
@@ -130,8 +128,20 @@ def health_check() -> Dict[str, Any]:
 @app.post("/orchestrator/start", status_code=status.HTTP_201_CREATED)
 def start_project(request: StartProjectRequest) -> Dict[str, Any]:
     """Start a new project blueprint generation workflow, advancing until Checkpoint 1."""
-    pid = request.project_id or str(uuid.uuid4())
     graph = get_graph()
+
+    if request.project_id:
+        pid = request.project_id
+        existing_config = {"configurable": {"thread_id": pid}}
+        existing_snapshot = graph.get_state(existing_config)
+        if existing_snapshot and existing_snapshot.values:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Project '{pid}' already exists.",
+            )
+    else:
+        pid = str(uuid.uuid4())
+
     config = {"configurable": {"thread_id": pid}}
 
     initial_blueprint = ProjectBlueprintState(
@@ -175,6 +185,13 @@ def resume_project(project_id: str, request: ResumeProjectRequest) -> Dict[str, 
             detail=f"Project '{project_id}' not found.",
         )
 
+    active_cp = _get_active_checkpoint(state_snapshot)
+    if active_cp is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Project '{project_id}' is not currently paused at a human checkpoint.",
+        )
+
     curr_bp = state_snapshot.values.get("blueprint", {})
     if curr_bp.get("current_phase") in ("COMPLETED", ProjectPhase.COMPLETED.value):
         raise HTTPException(
@@ -188,6 +205,17 @@ def resume_project(project_id: str, request: ResumeProjectRequest) -> Dict[str, 
             detail="modified_ids cannot be empty when action is REVISE.",
         )
 
+    # Check for unaddressed blocking defects when approving
+    reports = curr_bp.get("validation_reports") or []
+    latest_report = reports[-1] if reports else None
+    if request.action == "APPROVE" and latest_report:
+        rep_status = latest_report.get("status")
+        if rep_status in (ValidationStatus.FAILED.value, ValidationStatus.FAILED) and not request.force_approve:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Validation gate failed with blocking defects. Defects must be revised or approved with force_approve=True.",
+            )
+
     resume_payload = {
         "action": request.action,
         "modified_ids": request.modified_ids,
@@ -198,11 +226,11 @@ def resume_project(project_id: str, request: ResumeProjectRequest) -> Dict[str, 
 
     new_snapshot = graph.get_state(config)
     new_values = new_snapshot.values or {}
-    active_cp = _get_active_checkpoint(new_snapshot)
+    new_active_cp = _get_active_checkpoint(new_snapshot)
 
     return {
         "project_id": project_id,
-        "active_checkpoint": active_cp,
+        "active_checkpoint": new_active_cp,
         "state": new_values.get("blueprint"),
         "versions": new_values.get("version_history", []),
     }

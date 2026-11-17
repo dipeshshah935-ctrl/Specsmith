@@ -8,6 +8,7 @@ from app.schemas import (
     ColumnDefinition,
     DatabaseEntity,
     DefectSeverity,
+    DTOField,
     EndpointSpec,
     EntityRelationship,
     Feature,
@@ -150,8 +151,8 @@ def sample_endpoints():
             summary="Create a new order",
             allowed_actor_ids=["ACT-02"],
             is_idempotent=True,
-            request_dto_schema={"type": "object", "properties": {"items": {"type": "array"}}},
-            response_dto_schema={"type": "object", "properties": {"order_id": {"type": "string"}}},
+            request_dto_schema=[DTOField(name="items", field_type="array", required=True)],
+            response_dto_schema=[DTOField(name="order_id", field_type="string", required=True)],
             error_codes=[400, 401, 403, 409, 500],
         ),
         EndpointSpec(
@@ -163,7 +164,7 @@ def sample_endpoints():
             allowed_actor_ids=["ACT-01"],
             is_idempotent=True,
             request_dto_schema=None,
-            response_dto_schema={"type": "object", "properties": {"status": {"type": "string"}}},
+            response_dto_schema=[DTOField(name="status", field_type="string", required=True)],
             error_codes=[400, 401, 403, 404, 409],
         ),
     ]
@@ -628,8 +629,8 @@ class TestDAGChangePropagator:
                 DatabaseEntity(id="TBL-02", upstream_ids=["FEAT-02"], table_name="t2", columns=[ColumnDefinition(name="id", data_type="int", is_primary_key=True)]),
             ],
             endpoints=[
-                EndpointSpec(id="EP-01", upstream_ids=["FEAT-01", "TBL-01"], http_method="GET", path="/api/v1/t1", summary="s", allowed_actor_ids=["ACT-01"], response_dto_schema={}),
-                EndpointSpec(id="EP-02", upstream_ids=["FEAT-02", "TBL-02"], http_method="GET", path="/api/v1/t2", summary="s", allowed_actor_ids=["ACT-01"], response_dto_schema={}),
+                EndpointSpec(id="EP-01", upstream_ids=["FEAT-01", "TBL-01"], http_method="GET", path="/api/v1/t1", summary="s", allowed_actor_ids=["ACT-01"], response_dto_schema=[]),
+                EndpointSpec(id="EP-02", upstream_ids=["FEAT-02", "TBL-02"], http_method="GET", path="/api/v1/t2", summary="s", allowed_actor_ids=["ACT-01"], response_dto_schema=[]),
             ],
         )
 

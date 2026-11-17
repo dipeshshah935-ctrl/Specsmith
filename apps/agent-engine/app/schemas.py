@@ -193,6 +193,13 @@ class DatabaseArchitectOutput(StrictContractModel):
 # LAYER 4: API ARCHITECTURE (API Architect) — OpenAPI 3.1 & RFC 7807
 # =====================================================================
 
+class DTOField(StrictContractModel):
+    name: str = Field(min_length=1)
+    field_type: str = Field(min_length=1, description="Data type e.g. string, integer, boolean, UUID")
+    required: bool = True
+    description: str = ""
+
+
 class EndpointSpec(StrictContractModel):
     id: str = Field(
         pattern=r"^EP-\d{2,4}$",
@@ -213,8 +220,8 @@ class EndpointSpec(StrictContractModel):
         description="References Actor.id list",
     )
     is_idempotent: bool = Field(default=False)
-    request_dto_schema: Optional[Dict[str, Any]] = None
-    response_dto_schema: Dict[str, Any] = Field(default_factory=dict)
+    request_dto_schema: Optional[List[DTOField]] = None
+    response_dto_schema: List[DTOField] = Field(default_factory=list)
     error_codes: List[int] = Field(
         default_factory=lambda: [400, 401, 403, 404, 500],
         description="Standard HTTP error codes e.g. [400, 401, 403, 404, 409]",
@@ -274,12 +281,4 @@ class ProjectBlueprintState(StrictContractModel):
     human_feedback_notes: Optional[str] = None
 
 
-# =====================================================================
-# ORCHESTRATOR GRAPH STATE
-# =====================================================================
 
-class OrchestratorGraphState(TypedDict):
-    blueprint: ProjectBlueprintState
-    gate_1_retries: int
-    gate_2_retries: int
-    blast_radius: Optional[Dict[str, Set[str]]]

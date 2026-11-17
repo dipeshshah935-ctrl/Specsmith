@@ -261,12 +261,24 @@ def human_checkpoint_1_node(
         current_state.current_phase = ProjectPhase.ARCHITECTURE
         approved_dict = current_state.model_dump(mode="json")
         updated_history = _upsert_version_history(version_history, approved_dict)
+
+        # Preserve downstream blast radius (stale_tables, stale_endpoints) if present
+        current_blast = state.get("blast_radius") or {}
+        stale_tbls = current_blast.get("stale_tables") or []
+        stale_eps = current_blast.get("stale_endpoints") or []
+        downstream_blast = None
+        if stale_tbls or stale_eps:
+            downstream_blast = {
+                "stale_tables": list(stale_tbls),
+                "stale_endpoints": list(stale_eps),
+            }
+
         return Command(
             goto="database_architect",
             update={
                 "blueprint": approved_dict,
                 "gate_1_retries": 0,
-                "blast_radius": None,
+                "blast_radius": downstream_blast,
                 "version_history": updated_history,
             },
         )
@@ -383,18 +395,16 @@ def build_orchestrator_graph(checkpointer=None):
     if checkpointer is None:
         try:
             settings = EngineSettings()
-            if settings.MONGODB_URI:
-                try:
-                    from langgraph.checkpoint.mongodb import MongoDBSaver
-                    from pymongo import MongoClient
+        except ValueError:
+            settings = None
 
-                    client = MongoClient(settings.MONGODB_URI)
-                    checkpointer = MongoDBSaver(client)
-                except (ImportError, Exception):
-                    checkpointer = MemorySaver()
-            else:
-                checkpointer = MemorySaver()
-        except (ValueError, Exception):
+        if settings and settings.MONGODB_URI:
+            from langgraph.checkpoint.mongodb import MongoDBSaver
+            from pymongo import MongoClient
+
+            client = MongoClient(settings.MONGODB_URI)
+            checkpointer = MongoDBSaver(client)
+        else:
             checkpointer = MemorySaver()
 
     builder = StateGraph(OrchestratorGraphState)

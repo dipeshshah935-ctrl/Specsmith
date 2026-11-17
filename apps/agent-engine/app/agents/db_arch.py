@@ -23,6 +23,7 @@ Using ONLY the Glossary and Features provided:
    The foreign_key_column MUST exist in the table's own columns and MUST be included in the table's indexes list.
 6. Privacy by Design: Mark sensitive or personally identifiable data columns with is_pii=True.
 7. Indexing Strategy: Declare single or composite indexes in the indexes list for primary keys, foreign keys, and frequently queried columns.
+8. Selective Regeneration & Defect Resolution: When stale_tables IDs are provided, regenerate ONLY those stale items while preserving their IDs. When retry_defects are provided, resolve every identified defect in the regenerated specifications.
 """
 
 

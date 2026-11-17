@@ -1,11 +1,19 @@
+export interface ProblemDetails {
+  type: string;
+  title: string;
+  status: number;
+  detail: unknown;
+}
+
 export class GatewayHttpError extends Error {
-  constructor(
-    public status: number,
-    public detail: unknown,
-    public title: string = "Gateway Error"
-  ) {
-    super(typeof detail === "string" ? detail : title);
+  public status: number;
+  public problemDetails: ProblemDetails;
+
+  constructor(status: number, problemDetails: ProblemDetails) {
+    super(typeof problemDetails.detail === "string" ? problemDetails.detail : problemDetails.title);
     this.name = "GatewayHttpError";
+    this.status = status;
+    this.problemDetails = problemDetails;
   }
 }
 
@@ -36,94 +44,115 @@ export interface PythonResumeRequest {
   force_approve?: boolean;
 }
 
-export class PythonBridgeService {
-  private baseUrl: string;
+function getBaseUrl(): string {
+  return process.env.PYTHON_ENGINE_URL || "http://127.0.0.1:8000";
+}
 
-  constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl ?? process.env.PYTHON_ENGINE_URL ?? "http://localhost:8000";
-  }
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const url = `${getBaseUrl()}${path}`;
+  const headers = {
+    "Content-Type": "application/json",
+    ...options.headers,
+  };
 
-  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
-    const headers = {
-      "Content-Type": "application/json",
-      ...options.headers,
-    };
-
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        ...options,
-        headers,
-        signal: AbortSignal.timeout(120_000),
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch (err: unknown) {
+    const error = err as Error;
+    if (error.name === "TimeoutError") {
+      throw new GatewayHttpError(504, {
+        type: "about:blank",
+        title: "Gateway Timeout",
+        status: 504,
+        detail: "Python engine request timed out after 120 seconds",
       });
-    } catch (err: unknown) {
-      const error = err as Error;
-      if (error.name === "TimeoutError") {
-        throw new GatewayHttpError(504, "Python engine request timed out after 120 seconds", "Gateway Timeout");
-      }
-      throw new GatewayHttpError(
-        503,
-        `Unable to connect to Python engine at ${this.baseUrl}: ${error.message}`,
-        "Service Unavailable"
-      );
+    }
+    throw new GatewayHttpError(503, {
+      type: "about:blank",
+      title: "Service Unavailable",
+      status: 503,
+      detail: `Unable to connect to Python engine at ${getBaseUrl()}: ${error.message}`,
+    });
+  }
+
+  if (!response.ok) {
+    let errorBody: any;
+    try {
+      errorBody = await response.json();
+    } catch {
+      errorBody = { detail: await response.text() };
     }
 
-    if (!response.ok) {
-      let errorBody: any;
-      try {
-        errorBody = await response.json();
-      } catch {
-        errorBody = { detail: await response.text() };
-      }
-
-      const detail = errorBody?.detail ?? errorBody?.title ?? response.statusText;
-      const title = errorBody?.title ?? "Python Engine Error";
-      throw new GatewayHttpError(response.status, detail, title);
-    }
-
-    return (await response.json()) as T;
+    const problemDetails: ProblemDetails = {
+      type: errorBody?.type ?? "about:blank",
+      title: errorBody?.title ?? (response.statusText || "Python Engine Error"),
+      status: response.status,
+      detail: errorBody?.detail ?? errorBody?.title ?? "An error occurred in Python engine",
+    };
+    throw new GatewayHttpError(response.status, problemDetails);
   }
 
-  async startProject(userInitialPrompt: string, projectId?: string): Promise<PythonStartResponse> {
-    return await this.request<PythonStartResponse>("/orchestrator/start", {
-      method: "POST",
-      body: JSON.stringify({
-        user_initial_prompt: userInitialPrompt,
-        project_id: projectId,
-      }),
-    });
-  }
+  return (await response.json()) as T;
+}
 
-  async resumeProject(projectId: string, payload: PythonResumeRequest): Promise<PythonResumeResponse> {
-    return await this.request<PythonResumeResponse>(`/orchestrator/${projectId}/resume`, {
-      method: "POST",
-      body: JSON.stringify({
-        action: payload.action,
-        modified_ids: payload.modified_ids ?? [],
-        feedback_notes: payload.feedback_notes,
-        force_approve: payload.force_approve ?? false,
-      }),
-    });
-  }
+export async function startOrchestrator(
+  userInitialPrompt: string,
+  projectId?: string
+): Promise<PythonStartResponse> {
+  return await request<PythonStartResponse>("/orchestrator/start", {
+    method: "POST",
+    body: JSON.stringify({
+      user_initial_prompt: userInitialPrompt,
+      project_id: projectId,
+    }),
+  });
+}
 
-  async getProjectState(projectId: string): Promise<PythonStateResponse> {
-    return await this.request<PythonStateResponse>(`/orchestrator/${projectId}/state`, {
-      method: "GET",
-    });
-  }
+export async function resumeOrchestrator(
+  projectId: string,
+  payload: PythonResumeRequest
+): Promise<PythonResumeResponse> {
+  return await request<PythonResumeResponse>(`/orchestrator/${projectId}/resume`, {
+    method: "POST",
+    body: JSON.stringify({
+      action: payload.action,
+      modified_ids: payload.modified_ids ?? [],
+      feedback_notes: payload.feedback_notes,
+      force_approve: payload.force_approve ?? false,
+    }),
+  });
+}
 
-  async getProjectVersions(projectId: string): Promise<Array<Record<string, unknown>>> {
-    return await this.request<Array<Record<string, unknown>>>(`/orchestrator/${projectId}/versions`, {
-      method: "GET",
-    });
-  }
+export async function getOrchestratorState(projectId: string): Promise<PythonStateResponse> {
+  return await request<PythonStateResponse>(`/orchestrator/${projectId}/state`, {
+    method: "GET",
+  });
+}
 
-  async checkHealth(): Promise<{ status: string; mock_llm?: boolean }> {
-    return await this.request<{ status: string; mock_llm?: boolean }>("/health", {
-      method: "GET",
-    });
-  }
+export async function getOrchestratorVersions(projectId: string): Promise<Array<Record<string, unknown>>> {
+  return await request<Array<Record<string, unknown>>>(`/orchestrator/${projectId}/versions`, {
+    method: "GET",
+  });
+}
+
+export async function checkHealth(): Promise<{ status: string; mock_llm?: boolean }> {
+  return await request<{ status: string; mock_llm?: boolean }>("/health", {
+    method: "GET",
+  });
+}
+
+// Backward-compatibility class & instance
+export class PythonBridgeService {
+  startProject = startOrchestrator;
+  resumeProject = resumeOrchestrator;
+  getProjectState = getOrchestratorState;
+  getProjectVersions = getOrchestratorVersions;
+  checkHealth = checkHealth;
 }
 
 export const pythonBridge = new PythonBridgeService();

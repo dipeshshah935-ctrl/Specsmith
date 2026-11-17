@@ -1,20 +1,22 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { ProjectRecord } from "../models/ProjectRecord.js";
-import { pythonBridge, GatewayHttpError } from "../services/pythonBridge.js";
+import { startOrchestrator, resumeOrchestrator } from "../services/pythonBridge.js";
 
 export const projectsRouter = Router();
 
 const createProjectSchema = z
   .object({
     title: z.string().trim().min(1, "Title is required"),
+    user_initial_prompt: z.string().trim().min(1, "user_initial_prompt is required").optional(),
     prompt: z.string().trim().min(1, "Prompt is required").optional(),
     userInitialPrompt: z.string().trim().min(1, "User initial prompt is required").optional(),
+    project_id: z.string().trim().min(1).optional(),
     projectId: z.string().trim().min(1).optional(),
   })
-  .refine((data) => Boolean(data.prompt || data.userInitialPrompt), {
-    message: "Either prompt or userInitialPrompt must be provided",
-    path: ["prompt"],
+  .refine((data) => Boolean(data.user_initial_prompt || data.prompt || data.userInitialPrompt), {
+    message: "user_initial_prompt is required",
+    path: ["user_initial_prompt"],
   });
 
 const reviewProjectSchema = z
@@ -60,10 +62,13 @@ projectsRouter.post("/", async (req: Request, res: Response, next: NextFunction)
       });
     }
 
-    const { title, projectId } = parsed.data;
-    const prompt = (parsed.data.prompt || parsed.data.userInitialPrompt) as string;
+    const title = parsed.data.title;
+    const prompt = (parsed.data.user_initial_prompt ||
+      parsed.data.prompt ||
+      parsed.data.userInitialPrompt) as string;
+    const projectId = parsed.data.project_id || parsed.data.projectId;
 
-    const pythonResult = await pythonBridge.startProject(prompt, projectId);
+    const pythonResult = await startOrchestrator(prompt, projectId);
 
     const project = await ProjectRecord.create({
       projectId: pythonResult.project_id,
@@ -123,7 +128,7 @@ projectsRouter.post("/:id/review", async (req: Request, res: Response, next: Nex
       });
     }
 
-    const pythonResult = await pythonBridge.resumeProject(req.params.id, parsed.data);
+    const pythonResult = await resumeOrchestrator(req.params.id, parsed.data);
 
     project.latestState = pythonResult.state;
     project.currentPhase = (pythonResult.state?.current_phase as string) ?? project.currentPhase;

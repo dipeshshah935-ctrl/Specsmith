@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { projectsRouter } from "./routes/projects.js";
-import { GatewayHttpError, pythonBridge } from "./services/pythonBridge.js";
+import { GatewayHttpError, checkHealth } from "./services/pythonBridge.js";
 
 export const app = express();
 
@@ -20,7 +20,7 @@ app.use(express.json({ limit: "10mb" }));
 app.get("/health", async (_req: Request, res: Response) => {
   let pythonEngineStatus = "unavailable";
   try {
-    const health = await pythonBridge.checkHealth();
+    const health = await checkHealth();
     pythonEngineStatus = health.status ?? "ok";
   } catch {
     pythonEngineStatus = "unreachable";
@@ -41,12 +41,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   res.setHeader("Content-Type", "application/problem+json");
 
   if (err instanceof GatewayHttpError) {
-    return res.status(err.status).json({
-      type: "about:blank",
-      title: err.title,
-      status: err.status,
-      detail: err.detail,
-    });
+    return res.status(err.status).json(err.problemDetails);
   }
 
   const error = err as Error;

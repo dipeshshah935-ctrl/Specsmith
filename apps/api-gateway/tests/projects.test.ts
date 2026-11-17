@@ -1,11 +1,69 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import request from "supertest";
 import { app } from "../src/server.js";
 import { ProjectRecord } from "../src/models/ProjectRecord.js";
+import { connectDatabase, disconnectDatabase } from "../src/config/db.js";
 
 describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
+  const inMemoryDb = new Map<string, any>();
+
+  beforeAll(async () => {
+    if (process.env.MONGODB_TEST_URI) {
+      await connectDatabase(process.env.MONGODB_TEST_URI);
+    }
+  });
+
+  afterAll(async () => {
+    if (process.env.MONGODB_TEST_URI) {
+      await disconnectDatabase();
+    }
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
+    inMemoryDb.clear();
+
+    if (!process.env.MONGODB_TEST_URI) {
+      // Stub ProjectRecord methods with in-memory map
+      vi.spyOn(ProjectRecord, "create").mockImplementation(async (doc: any) => {
+        const record = {
+          ...doc,
+          save: vi.fn().mockImplementation(async function (this: any) {
+            inMemoryDb.set(this.projectId, this);
+            return this;
+          }),
+        };
+        inMemoryDb.set(record.projectId, record);
+        return record as any;
+      });
+
+      vi.spyOn(ProjectRecord, "find").mockImplementation(() => {
+        return {
+          sort: vi.fn().mockImplementation(async () => Array.from(inMemoryDb.values())),
+        } as any;
+      });
+
+      vi.spyOn(ProjectRecord, "findOne").mockImplementation(((query: any) => {
+        const id = query?.projectId;
+        const item = inMemoryDb.get(id);
+        if (!item) return Promise.resolve(null);
+        return Promise.resolve({
+          ...item,
+          save: vi.fn().mockImplementation(async function (this: any) {
+            inMemoryDb.set(id, this);
+            return this;
+          }),
+        });
+      }) as any);
+
+      vi.spyOn(ProjectRecord, "findOneAndUpdate").mockImplementation(((query: any, update: any) => {
+        const id = query?.projectId;
+        const existing = inMemoryDb.get(id) || {};
+        const updated = { ...existing, ...update };
+        inMemoryDb.set(id, updated);
+        return Promise.resolve(updated);
+      }) as any);
+    }
   });
 
   afterEach(() => {
@@ -45,14 +103,16 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
 
   describe("GET /api/projects", () => {
     it("returns a list of projects sorted by updatedAt descending", async () => {
-      const mockProjects = [
-        { projectId: "proj-1", title: "Project 1", currentPhase: "DISCOVERY" },
-        { projectId: "proj-2", title: "Project 2", currentPhase: "COMPLETED" },
-      ];
-
-      vi.spyOn(ProjectRecord, "find").mockReturnValue({
-        sort: vi.fn().mockResolvedValue(mockProjects),
-      } as any);
+      inMemoryDb.set("proj-1", {
+        projectId: "proj-1",
+        title: "Project 1",
+        currentPhase: "DISCOVERY",
+      });
+      inMemoryDb.set("proj-2", {
+        projectId: "proj-2",
+        title: "Project 2",
+        currentPhase: "COMPLETED",
+      });
 
       const res = await request(app).get("/api/projects");
       expect(res.status).toBe(200);
@@ -62,7 +122,7 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
   });
 
   describe("POST /api/projects", () => {
-    it("creates a new project and triggers python engine start", async () => {
+    it("creates a new project and triggers startOrchestrator with user_initial_prompt", async () => {
       const pythonResponse = {
         project_id: "test-uuid-1",
         active_checkpoint: "GATE_1_REVIEW",
@@ -77,29 +137,18 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
         })
       );
 
-      const createdDoc = {
-        projectId: "test-uuid-1",
-        title: "E-Commerce Architecture",
-        userInitialPrompt: "Build an e-commerce platform",
-        currentPhase: "DISCOVERY",
-        currentVersion: 1,
-        activeCheckpoint: "GATE_1_REVIEW",
-        latestState: pythonResponse.state,
-        versions: pythonResponse.versions,
-      };
-
-      vi.spyOn(ProjectRecord, "create").mockResolvedValueOnce(createdDoc as any);
-
       const res = await request(app)
         .post("/api/projects")
         .send({
           title: "E-Commerce Architecture",
-          prompt: "Build an e-commerce platform",
+          user_initial_prompt: "Build an e-commerce platform",
         });
 
       expect(res.status).toBe(201);
       expect(res.body.projectId).toBe("test-uuid-1");
+      expect(res.body.title).toBe("E-Commerce Architecture");
       expect(res.body.activeCheckpoint).toBe("GATE_1_REVIEW");
+      expect(inMemoryDb.has("test-uuid-1")).toBe(true);
     });
 
     it("returns RFC 7807 400 Bad Request on invalid input body", async () => {
@@ -114,7 +163,7 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
       expect(res.body.detail).toBeDefined();
     });
 
-    it("returns RFC 7807 error when python engine fails", async () => {
+    it("returns RFC 7807 error when python engine returns !res.ok", async () => {
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         new Response(
           JSON.stringify({
@@ -135,7 +184,7 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
         .post("/api/projects")
         .send({
           title: "Duplicate Project",
-          prompt: "Some prompt",
+          user_initial_prompt: "Some prompt",
         });
 
       expect(res.status).toBe(409);
@@ -148,14 +197,12 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
 
   describe("GET /api/projects/:id", () => {
     it("returns project details for an existing project", async () => {
-      const mockProject = {
+      inMemoryDb.set("proj-123", {
         projectId: "proj-123",
         title: "Auth Service",
         currentPhase: "ARCHITECTURE",
         currentVersion: 1,
-      };
-
-      vi.spyOn(ProjectRecord, "findOne").mockResolvedValueOnce(mockProject as any);
+      });
 
       const res = await request(app).get("/api/projects/proj-123");
       expect(res.status).toBe(200);
@@ -164,8 +211,6 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
     });
 
     it("returns RFC 7807 404 Not Found for non-existent project", async () => {
-      vi.spyOn(ProjectRecord, "findOne").mockResolvedValueOnce(null);
-
       const res = await request(app).get("/api/projects/unknown-proj");
       expect(res.status).toBe(404);
       expect(res.body.type).toBe("about:blank");
@@ -176,8 +221,8 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
   });
 
   describe("POST /api/projects/:id/review", () => {
-    it("submits an APPROVE review action and updates project", async () => {
-      const mockProjectDoc = {
+    it("submits an APPROVE review action and updates project in MongoDB", async () => {
+      inMemoryDb.set("proj-123", {
         projectId: "proj-123",
         title: "Auth Service",
         currentPhase: "DISCOVERY",
@@ -185,10 +230,7 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
         activeCheckpoint: "GATE_1_REVIEW",
         latestState: {},
         versions: [],
-        save: vi.fn().mockResolvedValue(true),
-      };
-
-      vi.spyOn(ProjectRecord, "findOne").mockResolvedValueOnce(mockProjectDoc as any);
+      });
 
       const pythonResumeResponse = {
         project_id: "proj-123",
@@ -209,17 +251,16 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
         .send({ action: "APPROVE" });
 
       expect(res.status).toBe(200);
-      expect(mockProjectDoc.save).toHaveBeenCalled();
-      expect(mockProjectDoc.currentPhase).toBe("ARCHITECTURE");
-      expect(mockProjectDoc.activeCheckpoint).toBe("GATE_2_REVIEW");
+      const updated = inMemoryDb.get("proj-123");
+      expect(updated.currentPhase).toBe("ARCHITECTURE");
+      expect(updated.activeCheckpoint).toBe("GATE_2_REVIEW");
     });
 
     it("returns RFC 7807 400 Bad Request if action is REVISE with empty modified_ids", async () => {
-      const mockProjectDoc = {
+      inMemoryDb.set("proj-123", {
         projectId: "proj-123",
-        save: vi.fn(),
-      };
-      vi.spyOn(ProjectRecord, "findOne").mockResolvedValueOnce(mockProjectDoc as any);
+        title: "Auth Service",
+      });
 
       const res = await request(app)
         .post("/api/projects/proj-123/review")
@@ -232,8 +273,6 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
     });
 
     it("returns RFC 7807 404 if project does not exist", async () => {
-      vi.spyOn(ProjectRecord, "findOne").mockResolvedValueOnce(null);
-
       const res = await request(app)
         .post("/api/projects/missing-proj/review")
         .send({ action: "APPROVE" });
@@ -247,15 +286,13 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
 
   describe("GET /api/projects/:id/versions", () => {
     it("returns the version history for a project", async () => {
-      const mockVersions = [
-        { version: 1, blueprint: { version: 1 } },
-        { version: 2, blueprint: { version: 2 } },
-      ];
-
-      vi.spyOn(ProjectRecord, "findOne").mockResolvedValueOnce({
+      inMemoryDb.set("proj-123", {
         projectId: "proj-123",
-        versions: mockVersions,
-      } as any);
+        versions: [
+          { version: 1, blueprint: { version: 1 } },
+          { version: 2, blueprint: { version: 2 } },
+        ],
+      });
 
       const res = await request(app).get("/api/projects/proj-123/versions");
       expect(res.status).toBe(200);
@@ -265,8 +302,6 @@ describe("API Gateway - Projects Endpoints & RFC 7807 Contracts", () => {
     });
 
     it("returns RFC 7807 404 if project does not exist", async () => {
-      vi.spyOn(ProjectRecord, "findOne").mockResolvedValueOnce(null);
-
       const res = await request(app).get("/api/projects/missing-proj/versions");
       expect(res.status).toBe(404);
       expect(res.body.type).toBe("about:blank");
